@@ -1,0 +1,17 @@
+*
+!*/
+
+# ROOT
+!.gitignore
+!.gitattributes
+!LICENSE
+!README.md
+
+# PROJECTS
+!src/**
+
+# EVERYWHERE
+**/.DS_Store
+**/node_modules/
+**/.env
+**/.env.*
