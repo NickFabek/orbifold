@@ -430,6 +430,14 @@
     document.querySelector("[data-selection-title]").textContent = item.type === "expression" ? "Equation properties" : item.type === "shape" ? "Shape properties" : "Annotation properties";
     document.querySelector("[data-selected-color]").value = item.color || "#2d70b3";
     document.querySelector("[data-selected-visible]").checked = item.visible !== false;
+    const selectedLayer = document.querySelector("[data-selected-layer]");
+    selectedLayer.replaceChildren(...state.layers.map((layerOption) => {
+      const option = document.createElement("option");
+      option.value = layerOption.id;
+      option.textContent = layerOption.name;
+      return option;
+    }));
+    selectedLayer.value = item.layerId || state.layers[0].id;
     const labelRow = document.querySelector("[data-selected-label-row]");
     labelRow.hidden = item.type !== "expression" && item.type !== "shape";
     document.querySelector("[data-selected-label]").checked = Boolean(item.showLabel);
@@ -1183,6 +1191,17 @@
     graph.setExpressions(graphExpressions());
     graph.setAnnotations(graphAnnotations());
     updateLegend();
+    pushHistory();
+    persist();
+  });
+  document.querySelector("[data-selected-layer]").addEventListener("change", (event) => {
+    const item = selectedItem();
+    if (!item || !state.layers.some((layer) => layer.id === event.target.value)) return;
+    item.layerId = event.target.value;
+    state.activeLayerId = item.layerId;
+    graph.setExpressions(graphExpressions());
+    graph.setAnnotations(graphAnnotations());
+    renderLayers();
     pushHistory();
     persist();
   });

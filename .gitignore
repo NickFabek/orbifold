@@ -9,6 +9,8 @@
 
 # PROJECTS
 !src/**
+inspiration/
+dependencies/
 
 # EVERYWHERE
 **/.DS_Store

@@ -494,7 +494,7 @@
         } else {
           this.camera.target.x = this.view2d.centerX;
           this.camera.target.y = this.view2d.centerY;
-          this.camera.distance = clamp(Math.max(this.width, this.height) * this.camera.focalScale / Math.max(this.view2d.scale, 0.001), 2.2, 420);
+          this.camera.distance = clamp(Math.max(this.width, this.height) * this.camera.focalScale / Math.max(this.view2d.scale, 0.001), 2.2, 1e6);
         }
       }
       this.mode = mode;
@@ -1142,7 +1142,7 @@
         return;
       }
       const anchor = this.screenToPlane(screenX, screenY);
-      this.camera.distance = clamp(this.camera.distance * Math.exp(delta * sensitivity), 2.2, 420);
+      this.camera.distance = clamp(this.camera.distance * Math.exp(delta * sensitivity), 2.2, 1e6);
       this.lockPlanePointToScreen(anchor, screenX, screenY);
     }
 
@@ -1379,7 +1379,9 @@
       const pixelsPerUnit = this.mode === "2d"
         ? this.view2d.scale
         : state.focal / Math.max(this.camera.distance, 0.001);
-      const majorStep = 5 * 10 ** Math.ceil(Math.log10(70 / Math.max(pixelsPerUnit * 5, 0.001)));
+      const majorStep = this.mode === "3d"
+        ? this.gridMajorStep3d(state)
+        : 5 * 10 ** Math.ceil(Math.log10(70 / Math.max(pixelsPerUnit * 5, 0.001)));
       const minorStep = majorStep / 5;
       const microStep = majorStep / 10;
       const smoothstep = (start, end, value) => {
@@ -2180,7 +2182,8 @@
 
     plotRange3d() {
       const needed = Math.max(this.settings.range, this.camera.distance * 2.5, Math.hypot(this.camera.target.x, this.camera.target.y) * 1.25);
-      return Math.min(1e6, 2 ** Math.ceil(Math.log2(Math.max(needed, 1))));
+      if (needed <= this.settings.range) return this.settings.range;
+      return Math.min(1e8, this.settings.range * 2 ** Math.ceil(Math.log2(needed / this.settings.range)));
     }
 
     mapLayerPoint(expression, point) {
@@ -2231,6 +2234,11 @@
       const power = 10 ** Math.floor(Math.log10(raw));
       const normalized = raw / power;
       return (normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10) * power;
+    }
+
+    gridMajorStep3d(state = this.cameraState()) {
+      const pixelsPerUnit = state.focal / Math.max(this.camera.distance, 0.001);
+      return 5 * 10 ** Math.ceil(Math.log10(70 / Math.max(pixelsPerUnit * 5, 0.001)));
     }
 
     formatGridNumber(value) {
@@ -2563,8 +2571,9 @@
 
     build3d(vertices, labels) {
       const state = this.cameraState();
-      const axisExtent = clamp(this.camera.distance * 2, 10, 120);
+      const axisExtent = Math.min(this.plotRange3d(), Math.max(this.camera.distance * 2, 10));
       const expressions = this.visibleExpressions();
+      this.buildLayerSpaces(vertices, state);
       for (const expression of expressions) {
         if (["z-of-xy", "x-of-yz", "y-of-xz"].includes(expression.compiled.kind)) this.buildSurface3d(vertices, state, expression);
         if (expression.compiled.kind === "implicit-3d") this.buildImplicitSurface3d(vertices, state, expression);
@@ -2579,6 +2588,38 @@
         if (expression.compiled.kind === "radial") this.buildRadial3d(vertices, state, expression);
       }
       if (this.settings.axes) this.build3dAxes(vertices, labels, state, axisExtent);
+    }
+
+    buildLayerSpaces(vertices, state) {
+      const color = this.settings.dark ? [0.44, 0.68, 0.88, 0.22] : [0.18, 0.44, 0.7, 0.18];
+      const scale = Math.max(3, Math.min(10, this.plotRange3d() * 0.1));
+      for (const layer of this.layers) {
+        if (layer.visible === false || layer.space === "r3") continue;
+        const drawPath = (points) => {
+          for (let index = 1; index < points.length; index += 1) this.addProjectedLine(vertices, state, points[index - 1], points[index], 1, color);
+        };
+        const mapper = (point) => this.mapLayerPoint({ layer }, point);
+        if (layer.space === "sphere") {
+          for (let latitude = -Math.PI / 3; latitude <= Math.PI / 3 + 0.01; latitude += Math.PI / 6) {
+            drawPath(Array.from({ length: 73 }, (_, index) => mapper({ x: (index / 72 * Math.PI * 2 - Math.PI) * scale, y: latitude * scale, z: 0 })));
+          }
+          for (let longitude = -Math.PI; longitude < Math.PI; longitude += Math.PI / 6) {
+            drawPath(Array.from({ length: 37 }, (_, index) => mapper({ x: longitude * scale, y: (-Math.PI / 2 + index / 36 * Math.PI) * scale, z: 0 })));
+          }
+        } else if (layer.space === "torus") {
+          for (let v = 0; v < Math.PI * 2; v += Math.PI / 6) {
+            drawPath(Array.from({ length: 73 }, (_, index) => mapper({ x: index / 72 * Math.PI * 2 * scale, y: v * scale, z: 0 })));
+          }
+          for (let u = 0; u < Math.PI * 2; u += Math.PI / 6) {
+            drawPath(Array.from({ length: 37 }, (_, index) => mapper({ x: u * scale, y: index / 36 * Math.PI * 2 * scale, z: 0 })));
+          }
+        } else if (layer.space === "hyperbolic") {
+          for (let line = -scale; line <= scale; line += scale / 4) {
+            drawPath(Array.from({ length: 49 }, (_, index) => mapper({ x: -scale + index / 48 * scale * 2, y: line, z: 0 })));
+            drawPath(Array.from({ length: 49 }, (_, index) => mapper({ x: line, y: -scale + index / 48 * scale * 2, z: 0 })));
+          }
+        }
+      }
     }
 
     addProjectedLine(vertices, state, a, b, width, color) {
@@ -2660,15 +2701,29 @@
       for (const axis of axes) {
         if (!axis.ground) this.addProjectedLine(vertices, state, axis.start, axis.end, 1.8, hexToColor(axis.color));
         const point = this.project3(axis.end, state);
-        if (point) labels.push({ x: point.x + 6, y: point.y - 6, text: axis.label, color: axis.color, axis: true });
+        if (point && this.settings.labels) labels.push({ x: point.x + 6, y: point.y - 6, text: axis.label, color: axis.color, axis: true });
+      }
+      if (!this.settings.labels) return;
+      const step = this.gridMajorStep3d(state);
+      const addTick = (world, value, color, offsetX, offsetY) => {
+        const point = this.project3(world, state);
+        if (!point || point.x < 8 || point.x > this.width - 8 || point.y < 8 || point.y > this.height - 8) return;
+        labels.push({ x: point.x + offsetX, y: point.y + offsetY, text: this.formatGridNumber(value), color });
+      };
+      const limit = Math.min(extent, step * 24);
+      for (let value = -Math.floor(limit / step) * step; value <= limit + step * 0.1; value += step) {
+        if (Math.abs(value) < step * 0.1) continue;
+        addTick({ x: value, y: 0, z: 0 }, value, "#c74440", 4, 12);
+        addTick({ x: 0, y: value, z: 0 }, value, "#388c46", 4, 12);
+        if (value >= -extent * 0.45 && value <= extent * 0.75) addTick({ x: 0, y: 0, z: value }, value, "#2d70b3", 5, -5);
       }
     }
 
     buildSurface3d(vertices, state, expression) {
-      const cacheKey = `surface:${expression.compiled.kind}:${expression.id}`;
+      const range = this.plotRange3d();
+      const cacheKey = `surface:${expression.compiled.kind}:${expression.id}:${range}`;
       let worldPolygons = this.geometryCache.get(cacheKey);
       if (!worldPolygons) {
-        const range = this.settings.range;
         const steps = clamp(expression.resolution || 72, 24, 160);
         const maxZ = range * 1.5;
         const points = [];
@@ -2688,6 +2743,7 @@
               const y = this.safeEvaluate(expression, { x: u, z: v });
               if (Number.isFinite(y) && Math.abs(y) <= maxZ) point = { x: u, y, z: v };
             }
+            if (point) point = this.mapLayerPoint(expression, point);
             points[row][column] = point;
           }
         }
@@ -2726,17 +2782,18 @@
     }
 
     buildCurve3d(vertices, state, expression) {
-      const cacheKey = `curve:${expression.id}`;
+      const range = this.plotRange3d();
+      const cacheKey = `curve:${expression.id}:${range}`;
       let worldPoints = this.geometryCache.get(cacheKey);
       if (!worldPoints) {
-        const range = this.settings.range;
         const samples = clamp(Math.round(range * 30), 480, 1800);
         worldPoints = [];
         for (let index = 0; index <= samples; index += 1) {
           const input = -range + index / samples * range * 2;
-          worldPoints.push(expression.compiled.kind === "y-of-x"
+          const point = expression.compiled.kind === "y-of-x"
             ? { x: input, y: this.safeEvaluate(expression, { x: input }), z: 0 }
-            : { x: this.safeEvaluate(expression, { y: input }), y: input, z: 0 });
+            : { x: this.safeEvaluate(expression, { y: input }), y: input, z: 0 };
+          worldPoints.push(this.mapLayerPoint(expression, point));
         }
         this.geometryCache.set(cacheKey, worldPoints);
       }
@@ -2763,7 +2820,7 @@
         for (let index = 0; index <= samples; index += 1) {
           const t = index / samples * Math.PI * 2;
           const values = this.safeEvaluatePoint(expression, { t });
-          worldPoints.push(values ? { x: values[0], y: values[1], z: values[2] || 0 } : null);
+          worldPoints.push(values ? this.mapLayerPoint(expression, { x: values[0], y: values[1], z: values[2] || 0 }) : null);
         }
         this.geometryCache.set(cacheKey, worldPoints);
       }
@@ -2780,7 +2837,7 @@
           const theta = index / samples * Math.PI * 2;
           const radius = this.safeEvaluate(expression, { theta });
           worldPoints.push(Number.isFinite(radius)
-            ? { x: radius * Math.cos(theta), y: radius * Math.sin(theta), z: 0 }
+            ? this.mapLayerPoint(expression, { x: radius * Math.cos(theta), y: radius * Math.sin(theta), z: 0 })
             : null);
         }
         this.geometryCache.set(cacheKey, worldPoints);
@@ -2804,19 +2861,19 @@
     }
 
     buildImplicitCurve3d(vertices, state, expression) {
-      const cacheKey = `implicit:${expression.id}`;
+      const range = this.plotRange3d();
+      const cacheKey = `implicit:${expression.id}:${range}`;
       let worldSegments = this.geometryCache.get(cacheKey);
       if (!worldSegments) {
-        const range = this.settings.range;
         const bounds = { left: -range, right: range, top: range, bottom: -range };
         const columns = clamp(Math.round(range * 6), 96, 220);
         const rows = columns;
         const values = this.sampleImplicit(expression, bounds, columns, rows);
-        worldSegments = this.marchingSegments(values, columns, rows, 0, (column, row) => ({
+        worldSegments = this.marchingSegments(values, columns, rows, 0, (column, row) => this.mapLayerPoint(expression, ({
           x: bounds.left + column / columns * (bounds.right - bounds.left),
           y: bounds.top - row / rows * (bounds.top - bounds.bottom),
           z: 0,
-        }));
+        })));
         this.geometryCache.set(cacheKey, worldSegments);
       }
       const color = hexToColor(expression.color);
@@ -2830,10 +2887,10 @@
 
     buildComplex3d(vertices, state, expression) {
       const strategy = expression.visualization || "domain-coloring";
-      const cacheKey = `complex:${strategy}:${expression.id}`;
+      const range = this.plotRange3d();
+      const cacheKey = `complex:${strategy}:${expression.id}:${range}`;
       let worldPolygons = this.geometryCache.get(cacheKey);
       if (!worldPolygons) {
-        const range = this.settings.range;
         const steps = clamp(expression.resolution || 72, 24, 128);
         const points = [];
         for (let row = 0; row <= steps; row += 1) {
@@ -2896,10 +2953,10 @@
     }
 
     buildRecurrence3d(vertices, state, expression) {
-      const cacheKey = `recurrence:${expression.id}`;
+      const range = this.plotRange3d();
+      const cacheKey = `recurrence:${expression.id}:${range}`;
       let worldPolygons = this.geometryCache.get(cacheKey);
       if (!worldPolygons) {
-        const range = this.settings.range;
         const steps = clamp(expression.resolution || 72, 24, 128);
         const points = [];
         for (let row = 0; row <= steps; row += 1) {
@@ -3055,10 +3112,10 @@
     }
 
     buildImplicitSurface3d(vertices, state, expression) {
-      const cacheKey = `implicit-surface:${expression.id}`;
+      const range = this.plotRange3d();
+      const cacheKey = `implicit-surface:${expression.id}:${range}`;
       let worldTriangles = this.geometryCache.get(cacheKey);
       if (!worldTriangles) {
-        const range = this.settings.range;
         const steps = clamp(Math.round((expression.resolution || 72) * 0.62), 20, 72);
         const coordinates = Array.from({ length: steps + 1 }, (_, index) => {
           const normalized = index / steps * 2 - 1;
