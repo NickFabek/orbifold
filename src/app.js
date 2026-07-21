@@ -476,6 +476,7 @@
     renderLayers();
     updatePropertiesPanel();
     if (openProperties) setPanelOpen("properties", true);
+    persist();
   }
 
   function selectLayer(id, openProperties = false) {
@@ -490,6 +491,7 @@
     renderLayers();
     updatePropertiesPanel();
     if (openProperties) setPanelOpen("properties", true);
+    persist();
   }
 
   function setTool(tool) {
