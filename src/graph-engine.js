@@ -2591,10 +2591,11 @@
     }
 
     buildLayerSpaces(vertices, state) {
-      const color = this.settings.dark ? [0.44, 0.68, 0.88, 0.22] : [0.18, 0.44, 0.7, 0.18];
       const scale = Math.max(3, Math.min(10, this.plotRange3d() * 0.1));
       for (const layer of this.layers) {
         if (layer.visible === false || layer.space === "r3") continue;
+        const alpha = layer.representation === "implicit" ? 0.34 : 0.2;
+        const color = this.settings.dark ? [0.44, 0.68, 0.88, alpha] : [0.18, 0.44, 0.7, alpha];
         const drawPath = (points) => {
           for (let index = 1; index < points.length; index += 1) this.addProjectedLine(vertices, state, points[index - 1], points[index], 1, color);
         };
@@ -3149,11 +3150,12 @@
                 const tetraPoints = tetrahedron.map((index) => cubePoints[index]);
                 const tetraValues = tetrahedron.map((index) => cubeValues[index]);
                 for (const triangle of this.tetrahedronTriangles(tetraPoints, tetraValues)) {
-                  const sideA = { x: triangle[1].x - triangle[0].x, y: triangle[1].y - triangle[0].y, z: triangle[1].z - triangle[0].z };
-                  const sideB = { x: triangle[2].x - triangle[0].x, y: triangle[2].y - triangle[0].y, z: triangle[2].z - triangle[0].z };
+                  const mappedTriangle = triangle.map((point) => this.mapLayerPoint(expression, point));
+                  const sideA = { x: mappedTriangle[1].x - mappedTriangle[0].x, y: mappedTriangle[1].y - mappedTriangle[0].y, z: mappedTriangle[1].z - mappedTriangle[0].z };
+                  const sideB = { x: mappedTriangle[2].x - mappedTriangle[0].x, y: mappedTriangle[2].y - mappedTriangle[0].y, z: mappedTriangle[2].z - mappedTriangle[0].z };
                   const normal = normalize3(cross3(sideA, sideB));
                   const light = clamp(0.34 + Math.abs(dot3(normal, normalize3({ x: -0.4, y: -0.6, z: 1 }))) * 0.66, 0, 1);
-                  worldTriangles.push({ corners: triangle, light });
+                  worldTriangles.push({ corners: mappedTriangle, light });
                 }
               }
             }

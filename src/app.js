@@ -469,9 +469,11 @@
     const item = state.items.find((candidate) => candidate.id === id && candidate.type !== "note") || null;
     state.selectedId = item?.id || null;
     state.selectedLayerId = null;
+    if (item?.layerId) state.activeLayerId = item.layerId;
     expressionList.setSelected(state.selectedId);
     variableList.setSelected(state.selectedId);
     graph.setSelectedExpression(item?.id || null);
+    renderLayers();
     updatePropertiesPanel();
     if (openProperties) setPanelOpen("properties", true);
   }
